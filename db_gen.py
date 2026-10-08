@@ -1,12 +1,12 @@
 """
-db_gen.py — Génération incrémentale de la base (modèle v4).
+db_gen.py — Génération incrémentale de la base (v5).
 
-Aucune dépendance Streamlit : logique pure, testable en isolation.
-La base n'est PAS pré-remplie : chaque mois est généré à la demande
-(mois courant d'abord, puis rattrapage des mois antérieurs).
+Base non pré-remplie : chaque mois est généré à la demande. Aucune dépendance
+Streamlit. Les constantes de type/statut/barème sont définies ici et réutilisées
+ailleurs (source unique, évite la duplication).
 
-Schéma d'un enregistrement (8 colonnes) :
-    n, date_echeance, mois, type, montant, statut, rappel_j1, observations
+Schéma stocké (9 champs ; l'export reste à 8 colonnes, date_paiement est technique) :
+    n, date_echeance, mois, type, montant, statut, rappel_j1, observations, date_paiement
 """
 from __future__ import annotations
 
@@ -26,33 +26,30 @@ T_CN = "CNSS – cotisation mensuelle"
 T_S2 = "Salaire – 2e versement"
 T_S3 = "Salaire – 3e versement"
 
-# Barème fixe d'un mois : (jour, type, montant, ordre_tri)
+# Barème fixe : (jour, type, montant, ordre_tri)
 BAREME: List[Tuple[int, str, int, int]] = [
     (10, T_S1, 2500, 0),
     (10, T_CN, 1500, 1),
     (20, T_S2, 2500, 2),
     (30, T_S3, 2000, 3),
 ]
-
-# Ordre de tri stable pour départager deux échéances de même date
 ORDRE_TYPE = {t: o for _, t, _, o in BAREME}
+MONTANT_TYPE = {t: m for _, t, m, _ in BAREME}   # montant attendu par type
+JOUR_TYPE = {t: j for j, t, _, _ in BAREME}
 
+# Statut de référence — défini UNE fois ici, importé ailleurs
 STATUT_NON_PAYE = "Non payé"
 
 
 def mois_label(annee: int, mois: int) -> str:
-    """Libellé « Octobre 2026 »."""
     return f"{MOIS_FR[mois]} {annee}"
 
 
 def _jour_valide(annee: int, mois: int, jour: int) -> int:
-    """Rabat le jour sur le dernier jour du mois s'il n'existe pas (ex. 30 fév.)."""
-    dernier = calendar.monthrange(annee, mois)[1]
-    return min(jour, dernier)
+    return min(jour, calendar.monthrange(annee, mois)[1])
 
 
 def generer_mois(annee: int, mois: int) -> List[Dict]:
-    """Retourne les 4 échéances d'un mois (sans 'n', attribué à l'insertion)."""
     label = mois_label(annee, mois)
     out: List[Dict] = []
     for jour, typ, montant, _ in BAREME:
@@ -65,12 +62,12 @@ def generer_mois(annee: int, mois: int) -> List[Dict]:
             "statut": STATUT_NON_PAYE,
             "rappel_j1": (d - dt.timedelta(days=1)).isoformat(),
             "observations": "",
+            "date_paiement": None,
         })
     return out
 
 
 def cle(rec: Dict) -> Tuple[str, str]:
-    """Clé d'unicité d'une échéance : (mois, type)."""
     return (rec.get("mois", ""), rec.get("type", ""))
 
 
@@ -79,7 +76,6 @@ def _tri_key(rec: Dict):
 
 
 def trier_renumeroter(records: List[Dict]) -> List[Dict]:
-    """Trie par date puis type et réattribue 'n' de 1..N."""
     ordered = sorted(records, key=_tri_key)
     for i, rec in enumerate(ordered, start=1):
         rec["n"] = i
@@ -91,15 +87,10 @@ def mois_present(records: List[Dict], label: str) -> bool:
 
 
 def ajouter_mois(records: List[Dict], annee: int, mois: int) -> Tuple[List[Dict], bool, str]:
-    """
-    Ajoute les 4 échéances d'un mois si absent (anti-doublon).
-    Retourne (records, ok, message).
-    """
     label = mois_label(annee, mois)
     if mois_present(records, label):
         return records, False, f"Le mois « {label} » est déjà enregistré."
-    records = records + generer_mois(annee, mois)
-    records = trier_renumeroter(records)
+    records = trier_renumeroter(records + generer_mois(annee, mois))
     return records, True, f"Mois « {label} » ajouté (4 échéances)."
 
 

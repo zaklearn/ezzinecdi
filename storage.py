@@ -1,26 +1,21 @@
 """
-storage.py — Persistance de la base.
+storage.py — Persistance Google Drive durcie (v5).
 
-Source de vérité = data.json sur Google Drive (survie aux redéploiements
-Streamlit Cloud). Repli local automatique quand Google Drive n'est pas
-configuré (st.secrets absents), pour que l'app tourne aussi en local.
+- API Drive v3 via google-api-python-client + google-auth (oauth2client retiré).
+- Scope minimal drive.file (fichiers créés par l'app uniquement).
+- Erreurs NON silencieuses : une panne API lève DriveError → l'app passe en
+  lecture seule au lieu de retomber muettement sur une base vide.
+- Verrou optimiste : la révision (headRevisionId) du fichier est suivie ;
+  save() refuse d'écraser si la révision a changé (conflit → recharger/fusionner).
+- Rotation des backups (garde les N plus récents).
+- Repli local (sans secrets) : data.json + backups/ sur disque, écriture atomique.
 
-Chaîne de récupération au chargement :  Drive principal → backup Drive → base vide.
-Écriture :  backup horodaté → mise à jour de data.json.  (Écriture locale atomique
-dans tous les cas pour servir de cache.)
-
-Secrets attendus (.streamlit/secrets.toml) :
-
+Secrets attendus :
     [gdrive]
-    folder_id = "ID_DU_DOSSIER_DRIVE_PARTAGE"
+    folder_id = "..."
     [gdrive.service_account]
     type = "service_account"
-    project_id = "..."
-    private_key_id = "..."
-    private_key = "-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\\n"
-    client_email = "...@....iam.gserviceaccount.com"
-    client_id = "..."
-    token_uri = "https://oauth2.googleapis.com/token"
+    ...
 """
 from __future__ import annotations
 
@@ -28,38 +23,42 @@ import datetime as dt
 import json
 import os
 import tempfile
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 
 import streamlit as st
 
 DATA_FILE = "data.json"
 BACKUP_DIR = "backups"
 DRIVE_DATA_NAME = "data.json"
+SCOPES = ["https://www.googleapis.com/auth/drive.file"]
+GARDE_BACKUPS = 15
+
+
+class DriveError(RuntimeError):
+    """Panne Drive distincte d'un fichier absent (ne jamais traiter comme base vide)."""
 
 
 # --------------------------------------------------------------------------- #
-#  Détection Google Drive
+#  Détection / client
 # --------------------------------------------------------------------------- #
 def drive_active() -> bool:
-    """Vrai si les secrets Google Drive sont présents."""
     try:
         return "gdrive" in st.secrets and "service_account" in st.secrets["gdrive"]
     except Exception:
         return False
 
 
-@st.cache_resource(show_spinner=False)
-def _drive():
-    """Client Drive (pydrive2) authentifié par compte de service. Mis en cache."""
-    from pydrive2.auth import GoogleAuth
-    from pydrive2.drive import GoogleDrive
-    from oauth2client.service_account import ServiceAccountCredentials
+def mode_label() -> str:
+    return "Google Drive" if drive_active() else "Local (Drive non configuré)"
 
+
+@st.cache_resource(show_spinner=False)
+def _service():
+    from google.oauth2.service_account import Credentials
+    from googleapiclient.discovery import build
     info = dict(st.secrets["gdrive"]["service_account"])
-    scope = ["https://www.googleapis.com/auth/drive"]
-    gauth = GoogleAuth()
-    gauth.credentials = ServiceAccountCredentials.from_json_keyfile_dict(info, scope)
-    return GoogleDrive(gauth)
+    creds = Credentials.from_service_account_info(info, scopes=SCOPES)
+    return build("drive", "v3", credentials=creds, cache_discovery=False)
 
 
 def _folder_id() -> str:
@@ -67,7 +66,7 @@ def _folder_id() -> str:
 
 
 # --------------------------------------------------------------------------- #
-#  Écriture / lecture locale (cache + repli)
+#  Local atomique
 # --------------------------------------------------------------------------- #
 def _write_local_atomic(path: str, payload: str) -> None:
     d = os.path.dirname(os.path.abspath(path)) or "."
@@ -94,80 +93,107 @@ def _read_local() -> Optional[List[Dict]]:
 
 
 # --------------------------------------------------------------------------- #
-#  Drive : lecture / écriture
+#  Drive v3 (lève DriveError sur panne, renvoie None si réellement absent)
 # --------------------------------------------------------------------------- #
-def _drive_find(name: str):
-    q = (f"'{_folder_id()}' in parents and title = '{name}' "
-         f"and trashed = false")
-    files = _drive().ListFile({"q": q}).GetList()
-    return files[0] if files else None
-
-
-def _drive_read(name: str) -> Optional[List[Dict]]:
+def _drive_find(name: str) -> Optional[dict]:
+    from googleapiclient.errors import HttpError
     try:
-        f = _drive_find(name)
-        if not f:
-            return None
-        data = json.loads(f.GetContentString())
-        return data if isinstance(data, list) else None
-    except Exception:
-        return None
+        q = (f"'{_folder_id()}' in parents and name = '{name}' and trashed = false")
+        res = _service().files().list(
+            q=q, spaces="drive",
+            fields="files(id, name, headRevisionId, modifiedTime)").execute()
+        files = res.get("files", [])
+        return files[0] if files else None
+    except HttpError as e:
+        raise DriveError(f"Drive list a échoué : {e}") from e
 
 
-def _drive_write(name: str, payload: str) -> bool:
+def _drive_download(file_id: str) -> str:
+    from googleapiclient.errors import HttpError
     try:
-        f = _drive_find(name)
-        if f is None:
-            f = _drive().CreateFile({"title": name, "parents": [{"id": _folder_id()}]})
-        f.SetContentString(payload)
-        f.Upload()
-        return True
-    except Exception as e:  # noqa: BLE001
-        st.warning(f"Écriture Google Drive impossible : {e}")
-        return False
+        return _service().files().get_media(fileId=file_id).execute().decode("utf-8")
+    except HttpError as e:
+        raise DriveError(f"Drive download a échoué : {e}") from e
+
+
+def _drive_upload(name: str, payload: str, file_id: Optional[str]) -> dict:
+    from googleapiclient.errors import HttpError
+    from googleapiclient.http import MediaInMemoryUpload
+    media = MediaInMemoryUpload(payload.encode("utf-8"), mimetype="application/json")
+    try:
+        if file_id:
+            return _service().files().update(
+                fileId=file_id, media_body=media,
+                fields="id, headRevisionId").execute()
+        meta = {"name": name, "parents": [_folder_id()]}
+        return _service().files().create(
+            body=meta, media_body=media, fields="id, headRevisionId").execute()
+    except HttpError as e:
+        raise DriveError(f"Drive upload a échoué : {e}") from e
+
+
+def _rotate_backups() -> None:
+    from googleapiclient.errors import HttpError
+    try:
+        q = (f"'{_folder_id()}' in parents and name contains 'backup_' and trashed = false")
+        res = _service().files().list(
+            q=q, spaces="drive", orderBy="name desc",
+            fields="files(id, name)").execute()
+        for f in res.get("files", [])[GARDE_BACKUPS:]:
+            _service().files().delete(fileId=f["id"]).execute()
+    except HttpError:
+        pass  # la purge ne doit jamais bloquer une sauvegarde
 
 
 # --------------------------------------------------------------------------- #
 #  API publique
 # --------------------------------------------------------------------------- #
-def load() -> List[Dict]:
-    """Charge la base : Drive principal → backup Drive → local → base vide."""
+def load() -> Tuple[List[Dict], Optional[str]]:
+    """
+    Charge la base. Renvoie (data, revision).
+    Lève DriveError sur panne Drive (l'appelant passe en lecture seule) —
+    distinct d'un fichier réellement absent (renvoie [] , None).
+    """
     if drive_active():
-        data = _drive_read(DRIVE_DATA_NAME)
-        if data is not None:
-            _write_local_atomic(DATA_FILE, json.dumps(data, ensure_ascii=False, indent=2))
-            return data
-        # backup le plus récent sur Drive
-        try:
-            q = (f"'{_folder_id()}' in parents and title contains 'backup_' "
-                 f"and trashed = false")
-            backups = _drive().ListFile({"q": q}).GetList()
-            if backups:
-                backups.sort(key=lambda x: x["title"], reverse=True)
-                data = json.loads(backups[0].GetContentString())
-                if isinstance(data, list):
-                    return data
-        except Exception:
-            pass
+        f = _drive_find(DRIVE_DATA_NAME)            # peut lever DriveError
+        if f is None:
+            return [], None                          # réellement absent
+        raw = _drive_download(f["id"])               # peut lever DriveError
+        data = json.loads(raw)
+        if not isinstance(data, list):
+            raise DriveError("data.json distant corrompu (format inattendu).")
+        _write_local_atomic(DATA_FILE, json.dumps(data, ensure_ascii=False, indent=2))
+        return data, f.get("headRevisionId")
     local = _read_local()
-    return local if local is not None else []
+    return (local if local is not None else []), None
 
 
-def save(data: List[Dict]) -> bool:
-    """Backup horodaté puis mise à jour de data.json (Drive + cache local atomique)."""
+def save(data: List[Dict], expected_revision: Optional[str] = None
+         ) -> Tuple[bool, Optional[str], Optional[str]]:
+    """
+    Backup horodaté puis écriture de data.json.
+    Verrou optimiste : si expected_revision ≠ révision actuelle → conflit.
+    Renvoie (ok, nouvelle_revision, erreur).
+    """
     payload = json.dumps(data, ensure_ascii=False, indent=2)
-    _write_local_atomic(DATA_FILE, payload)  # cache local toujours
+    _write_local_atomic(DATA_FILE, payload)   # cache local toujours
 
     if not drive_active():
-        # Repli local : conserve aussi un backup sur disque
         stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
         _write_local_atomic(os.path.join(BACKUP_DIR, f"backup_{stamp}.json"), payload)
-        return True
+        return True, None, None
 
-    stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-    _drive_write(f"backup_{stamp}.json", payload)
-    return _drive_write(DRIVE_DATA_NAME, payload)
-
-
-def mode_label() -> str:
-    return "Google Drive" if drive_active() else "Local (Drive non configuré)"
+    try:
+        current = _drive_find(DRIVE_DATA_NAME)
+        cur_rev = current.get("headRevisionId") if current else None
+        if expected_revision is not None and cur_rev is not None \
+                and cur_rev != expected_revision:
+            return False, cur_rev, "conflit"   # révision changée entre-temps
+        stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        _drive_upload(f"backup_{stamp}.json", payload, None)
+        updated = _drive_upload(DRIVE_DATA_NAME, payload,
+                                current["id"] if current else None)
+        _rotate_backups()
+        return True, updated.get("headRevisionId"), None
+    except DriveError as e:
+        return False, None, str(e)

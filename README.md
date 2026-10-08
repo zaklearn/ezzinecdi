@@ -1,45 +1,49 @@
-# 💸 Suivi virements salaires & CNSS — Streamlit
+# 💸 Suivi virements salaires & CNSS — v5
 
-App de **suivi, mise à jour et export** des virements salaires et cotisations CNSS.
-Base **JSON incrémentale** (déclarée au fil de l'eau, durée non bornée), persistée sur
-**Google Drive** (survie aux redéploiements Streamlit Cloud), avec import/maj par upload
-JSON et contrôle d'intégrité au démarrage.
+App Streamlit de suivi/mise à jour/export des virements salaire et cotisations CNSS.
+Base JSON incrémentale, persistée sur Google Drive, **authentification par mot de passe
+avec rôles**, régularité calculée **au jour**, stockage durci (erreurs visibles, verrou
+optimiste, rotation des backups).
+
+## Nouveautés v5 (vs v4)
+- **Authentification + rôles** (`auth.py`) : `superadmin` (lecture/écriture) et `user` (lecture + export). Mots de passe dans `st.secrets`.
+- **Dates au jour** (`dates.py`) : `aujourdhui()` + fuseau Africa/Casablanca ; régularité basée sur `date_paiement` vs `date_echeance` (payer le 28 un dû le 10 = *retard*).
+- **Champ technique `date_paiement`** (schéma passe à 9 champs ; export toujours 8 colonnes).
+- **Stockage durci** (`storage.py`) : API Drive v3 + `google-auth` (fin d'`oauth2client`), scope `drive.file`, **erreurs non silencieuses → lecture seule**, **verrou optimiste** par révision, **rotation** des backups.
+- **Sécurité** : HTML échappé, validation montant/mois à l'import, fusion qui **préserve le payé**, confirmation avant *Remplacer*.
+- **Panneau Rappels** + ré-export **ICS** ; badge *en retard* distinct de *payé en retard*.
+- **Tests** (`tests/test_logic.py`).
 
 ## Fichiers
 | Fichier | Rôle |
 |---|---|
-| `app.py` | Interface : sidebar (mois courant figé · 3 panneaux · régularisation · import · diagnostic) |
-| `db_gen.py` | Générateur de mois (barème, anti-doublon, renumérotation) |
-| `integrity.py` | `reconcile()` : validation, dédoublonnage, détection payé/non payé |
-| `rapport.py` | Export Excel du recap (8 colonnes + total) |
-| `storage.py` | Persistance Google Drive + repli local |
-| `requirements.txt` | Dépendances |
-| `.streamlit/secrets.toml` | Modèle de configuration Drive (NON commité) |
+| `app.py` | UI : porte d'auth, 4 panneaux, rendu conditionnel par rôle |
+| `auth.py` | Mot de passe + rôles (`st.secrets`) |
+| `dates.py` | Date courante (fuseau Casablanca) |
+| `db_gen.py` | Génération de mois (barème, anti-doublon, renumérotation) |
+| `integrity.py` | Réconciliation, régularité au jour, détection payé/non payé |
+| `rapport.py` | Export Excel (8 colonnes) + ICS rappels |
+| `storage.py` | Persistance Drive durcie + repli local |
+| `tests/` | Tests logiques |
 
-## Barème mensuel (4 échéances = 8 500 DH)
-- 10 — Salaire 1er versement : 2 500 DH
-- 10 — CNSS : 1 500 DH
-- 20 — Salaire 2e versement : 2 500 DH
-- 30 (ou dernier jour) — Salaire 3e versement : 2 000 DH
+## Barème mensuel (8 500 DH)
+10 → Salaire 2 500 · 10 → CNSS 1 500 · 20 → Salaire 2 500 · 30 (ou dernier jour) → Salaire 2 000.
 
 ## Lancer en local
 ```bash
 pip install -r requirements.txt
 streamlit run app.py
 ```
-Sans secrets Drive, l'app tourne en **mode local** : `data.json` + `backups/` sur le disque.
+Renseigner au minimum le bloc `[auth]` dans `.streamlit/secrets.toml` (sinon connexion impossible). Sans `[gdrive]`, stockage **local** (`data.json` + `backups/`).
 
-## Persistance Google Drive (recommandé pour Streamlit Cloud)
-1. **Google Cloud Console** → créer un projet → activer **Google Drive API**.
-2. **Comptes de service** → créer un compte → générer une **clé JSON**.
-3. Dans **Google Drive**, créer un dossier et le **partager** (Éditeur) avec l'email du
-   compte de service (`...@...iam.gserviceaccount.com`). Noter l'**ID du dossier**
-   (dans l'URL `https://drive.google.com/drive/folders/<ID>`).
-4. Renseigner les secrets (voir `.streamlit/secrets.toml`) — en local dans ce fichier,
-   sur le cloud via **App → Settings → Secrets** :
+## Secrets (local : `.streamlit/secrets.toml` · cloud : Settings → Secrets)
 ```toml
+[auth]
+superadmin_password = "MOT_DE_PASSE_ADMIN"
+user_password = "MOT_DE_PASSE_LECTEUR"
+
 [gdrive]
-folder_id = "ID_DU_DOSSIER"
+folder_id = "ID_DU_DOSSIER_DRIVE"
 
 [gdrive.service_account]
 type = "service_account"
@@ -51,19 +55,21 @@ client_id = "..."
 token_uri = "https://oauth2.googleapis.com/token"
 ```
 
-## Déployer sur Streamlit Community Cloud
-1. Pousser le dossier sur un dépôt GitHub (le `.gitignore` exclut secrets, `data.json`, `backups/`).
-2. share.streamlit.io → **New app** → sélectionner le dépôt et `app.py`.
-3. Coller les secrets Drive. L'app recrée/récupère `data.json` depuis Drive à chaque démarrage.
+### Reset d'un mot de passe
+Les mots de passe vivent dans les secrets, pas dans une base. Pour en changer :
+**Streamlit Cloud** → App → Settings → Secrets → modifier la valeur → Save (l'app redémarre).
+**Local** → éditer `.streamlit/secrets.toml`. La « clé maîtresse » est l'accès au compte Streamlit Cloud / GitHub.
 
-## Flux d'usage
-- **1er lancement** : base vide → déclarer le **mois courant** (libre, pas de mois imposé).
-- **Mois courant (figé)** : payer les échéances du mois système → tag *à temps*.
-- **Régularisation** : déclarer/payer un mois **antérieur** (*retard*) ou **futur** (*avance*).
-- **Récap & export** : KPIs + téléchargement Excel (payées / base complète).
-- **Importer** : charger un `data.json` (Remplacer ou Fusionner) → persisté sur Drive.
+## Google Drive (service account)
+1. Google Cloud → projet → activer **Google Drive API**.
+2. **Service account** → clé **JSON**.
+3. Drive → créer un dossier → **Partager** (Éditeur) avec l'email du compte de service → copier l'**ID** du dossier.
+4. Coller la clé dans `[gdrive.service_account]` et l'ID dans `folder_id`.
 
-## Récupération / anti-perte
-- Chargement : **Drive principal → backup Drive → local → base vide**.
-- Chaque sauvegarde écrit d'abord un **backup horodaté**, puis `data.json`.
-- `reconcile()` répare doublons / rappels / schéma au démarrage et re-sauvegarde si besoin.
+## Déploiement Streamlit Cloud
+Pousser le repo (le `.gitignore` exclut secrets, `data.json`, `backups/`), puis New app → `app.py` → coller les secrets.
+
+## Tests
+```bash
+pip install pytest && pytest -q
+```
