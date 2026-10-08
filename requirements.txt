@@ -1,5 +1,5 @@
-streamlit>=1.37
-openpyxl>=3.1
-google-api-python-client>=2.100
-google-auth>=2.30
-tzdata>=2024.1
+streamlit
+openpyxl
+google-api-python-client
+google-auth
+tzdata
