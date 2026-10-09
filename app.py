@@ -241,11 +241,7 @@ with st.sidebar:
                     else:
                         st.caption(f"✅ {rec['type']} — {rec['statut']}")
 
-        st.divider()
 
-    
-
-    st.divider()
     d = st.session_state.get("diag", {})
     with st.expander("🔎 Diagnostic"):
         st.caption(f"Persistance : **{storage.mode_label()}** · "
