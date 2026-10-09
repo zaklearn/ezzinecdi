@@ -240,33 +240,10 @@ with st.sidebar:
                             dlg_payer(rec)
                     else:
                         st.caption(f"✅ {rec['type']} — {rec['statut']}")
-"""
+
         st.divider()
-        with st.container(border=True):
-            st.markdown("#### ⬆️ Importer une base")
-            up = st.file_uploader("Fichier data.json", type="json", label_visibility="collapsed")
-            mode = st.radio("Mode", ["Fusionner", "Remplacer"], horizontal=True)
-            if up is not None and st.button("Importer", use_container_width=True):
-                try:
-                    imported = json.load(up)
-                    if not isinstance(imported, list):
-                        raise ValueError("Le fichier doit contenir une liste.")
-                    if mode == "Remplacer":
-                        dlg_remplacer(imported)
-                    else:
-                        # Fusion : ne JAMAIS rétrograder un payé en non payé
-                        par_cle = {db_gen.cle(r): r for r in _data()}
-                        for r in imported:
-                            k = db_gen.cle(r)
-                            anc = par_cle.get(k)
-                            if anc and integrity.est_paye(anc) and not integrity.est_paye(r):
-                                continue  # on garde le paiement existant
-                            par_cle[k] = r
-                        _persister(list(par_cle.values()))
-                        st.rerun()
-                except (json.JSONDecodeError, ValueError) as e:
-                    st.error(f"Import impossible : {e}")
-    """
+
+    
 
     st.divider()
     d = st.session_state.get("diag", {})
