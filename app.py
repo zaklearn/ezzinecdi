@@ -240,7 +240,7 @@ with st.sidebar:
                             dlg_payer(rec)
                     else:
                         st.caption(f"✅ {rec['type']} — {rec['statut']}")
-
+"""
         st.divider()
         with st.container(border=True):
             st.markdown("#### ⬆️ Importer une base")
@@ -266,6 +266,7 @@ with st.sidebar:
                         st.rerun()
                 except (json.JSONDecodeError, ValueError) as e:
                     st.error(f"Import impossible : {e}")
+    """
 
     st.divider()
     d = st.session_state.get("diag", {})
