@@ -1,0 +1,134 @@
+[
+  {
+    "date_echeance": "2026-07-10",
+    "mois": "Juillet 2026",
+    "type": "Salaire – 1er versement",
+    "montant": 2500,
+    "statut": "Non payé",
+    "rappel_j1": "2026-07-09",
+    "observations": "",
+    "date_paiement": null,
+    "n": 1
+  },
+  {
+    "date_echeance": "2026-07-10",
+    "mois": "Juillet 2026",
+    "type": "CNSS – cotisation mensuelle",
+    "montant": 1500,
+    "statut": "Non payé",
+    "rappel_j1": "2026-07-09",
+    "observations": "",
+    "date_paiement": null,
+    "n": 2
+  },
+  {
+    "date_echeance": "2026-07-20",
+    "mois": "Juillet 2026",
+    "type": "Salaire – 2e versement",
+    "montant": 2500,
+    "statut": "Non payé",
+    "rappel_j1": "2026-07-19",
+    "observations": "",
+    "date_paiement": null,
+    "n": 3
+  },
+  {
+    "date_echeance": "2026-07-30",
+    "mois": "Juillet 2026",
+    "type": "Salaire – 3e versement",
+    "montant": 2000,
+    "statut": "Non payé",
+    "rappel_j1": "2026-07-29",
+    "observations": "",
+    "date_paiement": null,
+    "n": 4
+  },
+  {
+    "date_echeance": "2026-08-10",
+    "mois": "Août 2026",
+    "type": "Salaire – 1er versement",
+    "montant": 2500,
+    "statut": "Non payé",
+    "rappel_j1": "2026-08-09",
+    "observations": "",
+    "date_paiement": null,
+    "n": 5
+  },
+  {
+    "date_echeance": "2026-08-10",
+    "mois": "Août 2026",
+    "type": "CNSS – cotisation mensuelle",
+    "montant": 1500,
+    "statut": "Non payé",
+    "rappel_j1": "2026-08-09",
+    "observations": "",
+    "date_paiement": null,
+    "n": 6
+  },
+  {
+    "date_echeance": "2026-08-20",
+    "mois": "Août 2026",
+    "type": "Salaire – 2e versement",
+    "montant": 2500,
+    "statut": "Non payé",
+    "rappel_j1": "2026-08-19",
+    "observations": "",
+    "date_paiement": null,
+    "n": 7
+  },
+  {
+    "date_echeance": "2026-08-30",
+    "mois": "Août 2026",
+    "type": "Salaire – 3e versement",
+    "montant": 2000,
+    "statut": "Non payé",
+    "rappel_j1": "2026-08-29",
+    "observations": "",
+    "date_paiement": null,
+    "n": 8
+  },
+  {
+    "date_echeance": "2026-09-10",
+    "mois": "Septembre 2026",
+    "type": "Salaire – 1er versement",
+    "montant": 2500,
+    "statut": "Payé – retard",
+    "rappel_j1": "2026-09-09",
+    "observations": "Payé le 09/10/2026 (retard)",
+    "date_paiement": "2026-10-09",
+    "n": 9
+  },
+  {
+    "date_echeance": "2026-09-10",
+    "mois": "Septembre 2026",
+    "type": "CNSS – cotisation mensuelle",
+    "montant": 1500,
+    "statut": "Payé – retard",
+    "rappel_j1": "2026-09-09",
+    "observations": "Payé le 09/10/2026 (retard)",
+    "date_paiement": "2026-10-09",
+    "n": 10
+  },
+  {
+    "date_echeance": "2026-09-20",
+    "mois": "Septembre 2026",
+    "type": "Salaire – 2e versement",
+    "montant": 2500,
+    "statut": "Non payé",
+    "rappel_j1": "2026-09-19",
+    "observations": "",
+    "date_paiement": null,
+    "n": 11
+  },
+  {
+    "date_echeance": "2026-09-30",
+    "mois": "Septembre 2026",
+    "type": "Salaire – 3e versement",
+    "montant": 2000,
+    "statut": "Non payé",
+    "rappel_j1": "2026-09-29",
+    "observations": "",
+    "date_paiement": null,
+    "n": 12
+  }
+]
